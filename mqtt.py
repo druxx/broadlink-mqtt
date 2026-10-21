@@ -618,6 +618,8 @@ if __name__ == '__main__':
 
     mqttc.username_pw_set(cf.get('mqtt_username'), cf.get('mqtt_password'))
 
+    print("Connecting to MQTT broker at %s:%s" % (cf.get('mqtt_broker', 'localhost'), cf.get('mqtt_port', '1883')))
+
     while True:
         try:
             mqttc.connect(cf.get('mqtt_broker', 'localhost'),
