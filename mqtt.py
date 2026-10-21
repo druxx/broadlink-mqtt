@@ -6,12 +6,12 @@ import os
 import sys
 import time
 import logging
-import logging.config
 import socket
 import sched
 import json
 import binascii
 import types
+from os import environ
 from threading import Thread
 from test import TestDevice
 
@@ -21,19 +21,22 @@ try:
 except ImportError:
     HAVE_TLS = False
 
-# read initial config files
+
 dirname = os.path.dirname(os.path.abspath(__file__)) + '/'
-logging.config.fileConfig(dirname + 'logging.conf')
-CONFIG = os.getenv('BROADLINKMQTTCONFIG', dirname + 'mqtt.conf')
-CONFIG_CUSTOM = os.getenv('BROADLINKMQTTCONFIGCUSTOM', dirname + 'custom.conf')
+logging.basicConfig( format='%(asctime)-8s %(levelname)s: %(message)s', datefmt="%Y-%m-%d %H:%M:%S", level=logging.DEBUG)
 
 
 class Config(object):
-    def __init__(self, filename=CONFIG, custom_filename=CONFIG_CUSTOM):
+    def __init__(self, filename='mqtt.conf'):
         self.config = {}
         exec(compile(open(filename, "rb").read(), filename, 'exec'), self.config)
-        if os.path.isfile(custom_filename):
-            exec(compile(open(custom_filename, "rb").read(), custom_filename, 'exec'), self.config)
+
+        self.config['mqtt_broker'] = environ.get('MQTT_BROKER', self.config.get('mqtt_broker', 'localhost'))
+        self.config['mqtt_port'] = environ.get('MQTT_PORT', self.config.get('mqtt_port', '1883'))
+        self.config['mqtt_topic_prefix'] = environ.get('MQTT_TOPIC_PREFIX', self.config.get('mqtt_topic_prefix', 'broadlink/'))
+        self.config['device_type'] = environ.get('DEVICE_TYPE', self.config.get('device_type', 'lookup'))
+        self.config['local_address'] = environ.get('LOCAL_ADDRESS', self.config.get('local_address', None))
+
 
         if self.config.get('ca_certs', None) is not None:
             self.config['tls'] = True
@@ -67,7 +70,7 @@ class Config(object):
 try:
     cf = Config()
 except Exception as e:
-    print("Cannot load configuration from file %s: %s" % (CONFIG, str(e)))
+    logging.error("Cannot load configuration from file: %s" % (str(e)))
     sys.exit(2)
 
 qos = cf.get('mqtt_qos', 0)
@@ -219,7 +222,7 @@ def on_message(client, device, msg):
 
 
 # noinspection PyUnusedLocal
-def on_connect(client, device, flags, result_code):
+def on_connect(client, device, flags, result_code, properties=None):
     if cf.get('mqtt_birth_payload', False):
         mqttc.publish(cf.get('mqtt_birth_topic', 'clients/broadlink'), payload=cf.get('mqtt_birth_payload'), qos=0, retain=True)
 
@@ -593,11 +596,14 @@ class SchedulerThread(Thread):
 
 
 if __name__ == '__main__':
+
+    logging.info("Broadlink MQTT client started")
+
     devices = get_device(cf)
 
     clientid = cf.get('mqtt_clientid', 'broadlink-%s' % os.getpid())
     # initialise MQTT broker connection
-    mqttc = paho.Client(paho.CallbackAPIVersion.VERSION1, clientid, clean_session=cf.get('mqtt_clean_session', False), userdata=devices)
+    mqttc = paho.Client(paho.CallbackAPIVersion.VERSION2, clientid, clean_session=cf.get('mqtt_clean_session', False), userdata=devices)
 
     mqttc.on_message = on_message
     mqttc.on_connect = on_connect
@@ -618,7 +624,7 @@ if __name__ == '__main__':
 
     mqttc.username_pw_set(cf.get('mqtt_username'), cf.get('mqtt_password'))
 
-    print("Connecting to MQTT broker at %s:%s" % (cf.get('mqtt_broker', 'localhost'), cf.get('mqtt_port', '1883')))
+    logging.info("Connecting to MQTT broker at %s:%s" % (cf.get('mqtt_broker', 'localhost'), cf.get('mqtt_port', '1883')))
 
     while True:
         try:
